@@ -1,289 +1,137 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Font Side-Bearing Fixer</title>
-    <script src="https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <style>
-        body {
-            font-family: 'Helvetica Neue', Arial, sans-serif;
-            background-color: #f5f7fa;
-            color: #333;
-            margin: 0;
-            padding: 40px 20px;
-            display: flex;
-            justify-content: center;
-        }
-        .container {
-            max-width: 650px;
-            width: 100%;
-            background: #fff;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-        }
-        h1 {
-            font-size: 24px;
-            margin-bottom: 5px;
-            text-align: center;
-            color: #2c3e50;
-        }
-        p.desc {
-            font-size: 14px;
-            color: #7f8c8d;
-            text-align: center;
-            margin-bottom: 25px;
-        }
-        .setting-group {
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            border: 1px solid #e2e8f0;
-        }
-        .setting-group label {
-            font-weight: bold;
-            color: #4a5568;
-        }
-        .setting-group input {
-            width: 80px;
-            padding: 8px;
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
-            font-size: 16px;
-            text-align: center;
-        }
-        .drop-zone {
-            border: 2px dashed #3498db;
-            border-radius: 8px;
-            padding: 40px 20px;
-            text-align: center;
-            cursor: pointer;
-            background-color: #f0f8ff;
-            transition: background-color 0.2s, border-color 0.2s;
-            margin-bottom: 25px;
-        }
-        .drop-zone:hover, .drop-zone.dragover {
-            background-color: #e1f0fa;
-            border-color: #2980b9;
-        }
-        .drop-zone p {
-            margin: 0;
-            font-size: 16px;
-            color: #34495e;
-            font-weight: bold;
-        }
-        .drop-zone span {
-            display: block;
-            font-size: 12px;
-            color: #95a5a6;
-            margin-top: 8px;
-        }
-        #file-input {
-            display: none;
-        }
-        .status-area {
-            margin-top: 20px;
-            max-height: 250px;
-            overflow-y: auto;
-        }
-        .log-msg {
-            padding: 12px;
-            border-radius: 6px;
-            font-size: 14px;
-            margin-bottom: 10px;
-            line-height: 1.4;
-        }
-        .log-msg.processing {
-            background-color: #ebf5fb;
-            color: #2980b9;
-            border: 1px solid #a9cce3;
-            font-weight: bold;
-        }
-        .log-msg.success {
-            background-color: #e8f8f5;
-            color: #27ae60;
-            border: 1px solid #a3e4d7;
-        }
-        .log-msg.error {
-            background-color: #fdebd0;
-            color: #e67e22;
-            border: 1px solid #fadbd8;
-        }
-    </style>
-</head>
-<body>
+import os
+import gradio as gr
+from fontTools.ttLib import TTFont, newTable
+from fontTools.pens.cu2quPen import Cu2QuPen
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+import time
+import zipfile
+import io
 
-<div class="container">
-    <h1>Font Side-Bearing Fixer</h1>
-    <p class="desc">直接テーブル書き換え版。余白を均一に調整し、まとめてZIP出力します。</p>
-
-    <div class="setting-group">
-        <label for="sb-input">左右余白（Side Bearing）:</label>
-        <input type="number" id="sb-input" value="30">
-    </div>
-
-    <div class="drop-zone" id="drop-zone">
-        <p>複数のフォントファイルをドロップするか、ここをクリック</p>
-        <span>対応フォーマット: .ttf / .otf</span>
-        <input type="file" id="file-input" accept=".ttf,.otf" multiple>
-    </div>
-
-    <div class="status-area" id="status-area"></div>
-</div>
-
-<script>
-    const dropZone = document.getElementById('drop-zone');
-    const fileInput = document.getElementById('file-input');
-    const sbInput = document.getElementById('sb-input');
-    const statusArea = document.getElementById('status-area');
-
-    const BAD_TABLES = ['GSUB', 'GPOS', 'DSIG', 'hdmx', 'LTSH', 'PCLT', 'VDMX'];
-
-    // 画面の更新（描画）を強制的に待つためのタイマー関数
-    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-    ['dragenter', 'dragover'].forEach(eventName => {
-        dropZone.addEventListener(eventName, (e) => {
-            e.preventDefault();
-            dropZone.classList.add('dragover');
-        }, false);
-    });
-
-    ['dragleave', 'drop'].forEach(eventName => {
-        dropZone.addEventListener(eventName, (e) => {
-            e.preventDefault();
-            dropZone.classList.remove('dragover');
-        }, false);
-    });
-
-    dropZone.addEventListener('click', () => fileInput.click());
+def otf_to_ttf_segments(font):
+    if 'CFF ' not in font:
+        return font
     
-    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
-    dropZone.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+    glyph_set = font.getGlyphSet()
+    glyf = newTable('glyf')
+    glyf.glyphs = {}
+    glyph_order = font.getGlyphOrder()
+    
+    for name in glyph_order:
+        old_glyph = glyph_set[name]
+        tt_pen = TTGlyphPen(glyph_set)
+        cu2qu_pen = Cu2QuPen(tt_pen, max_err=1.0, reverse_direction=True)
+        old_glyph.draw(cu2qu_pen)
+        glyf.glyphs[name] = tt_pen.glyph()
+    
+    font['glyf'] = glyf
+    font['loca'] = newTable('loca')
+    if 'CFF ' in font: del font['CFF ']
+    if 'VORG' in font: del font['VORG']
+    font.sfntVersion = "\x00\x01\x00\x00"
+    
+    tmp = io.BytesIO()
+    font.save(tmp)
+    tmp.seek(0)
+    return TTFont(tmp)
 
-    async function handleFiles(files) {
-        if (files.length === 0) return;
-        statusArea.innerHTML = ''; // ログクリア
+def process_multiple_fonts_no_rename(input_files, sb=30):
+    if not input_files:
+        return None, "ファイルを選択してください"
+    
+    timestamp = int(time.time())
+    output_dir = f"processed_{timestamp}"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    processed_paths = []
+    log_messages = []
 
-        const sb = parseInt(sbInput.value, 10) || 0;
-        const zip = new JSZip();
-        let successCount = 0;
-
-        const mainLogId = 'main-log';
-        showLog(`⏳ 合計 ${files.length} 個のフォントの処理を開始するヨ...`, 'processing', mainLogId);
-        await sleep(300); // 開始メッセージを出すためにちょっと待つネ
-
-        for (const file of Array.from(files)) {
-            const subLogId = 'log-' + Math.random().toString(36).substr(2, 9);
+    for file_obj in input_files:
+        input_path = file_obj.name
+        filename = os.path.basename(input_path)
+        
+        # 形式をTTFに統一
+        output_filename = f"fixed_{os.path.splitext(filename)[0]}.ttf"
+        output_path = os.path.join(output_dir, output_filename)
+        
+        try:
+            font = TTFont(input_path)
             
-            // 【ココを改善！】ハッキリ「処理中」と表示させて、少し待つコトで画面に表示させるヨ
-            showLog(`⏳ ${file.name} を処理中... 少々お待ちください...`, 'processing', subLogId);
-            await sleep(200); // 画面に「処理中」を表示させるためのウェイト
+            # 1. 編集のために一時的にTTF形式のデータ構造にする
+            # (OTFの場合でも、内部のglyfテーブルを操作するため)
+            if 'CFF ' in font:
+                font = otf_to_ttf_segments(font)
 
-            try {
-                const arrayBuffer = await readFileAsArrayBuffer(file);
-                const font = opentype.parse(arrayBuffer);
+            hmtx = font['hmtx']
+            glyf = font['glyf']
+            x_mins, x_maxs, y_mins, y_maxs = [], [], [], []
+            max_advance = 0
 
-                // 余白の調整処理
-                for (let i = 0; i < font.numGlyphs; i++) {
-                    const glyph = font.glyphs.get(i);
-                    const name = glyph.name;
+            # 2. 左右余白の調整
+            for name in font.getGlyphOrder():
+                # 【変更点】全角空白(uni3000)と半角空白(space)はスキップ
+                if name in ['space', 'uni3000']:
+                    continue
+                
+                glyph = glyf[name]
+                glyph.recalcBounds(glyf)
+                
+                if hasattr(glyph, 'xMin'):
+                    orig_width = glyph.xMax - glyph.xMin
+                    dx = sb - glyph.xMin
+                    
+                    if glyph.isComposite():
+                        for component in glyph.components:
+                            component.x = int(component.x + dx)
+                    elif hasattr(glyph, 'coordinates'):
+                        glyph.coordinates.translate((dx, 0))
+                    
+                    glyph.recalcBounds(glyf)
+                    new_advance = int(sb + orig_width + sb)
+                    hmtx[name] = [new_advance, int(sb)]
+                    
+                    x_mins.append(glyph.xMin); x_maxs.append(glyph.xMax)
+                    y_mins.append(glyph.yMin); y_maxs.append(glyph.yMax)
+                    if new_advance > max_advance: max_advance = new_advance
+                else:
+                    hmtx[name] = [int(sb * 2), int(sb)]
 
-                    if (name === 'space' || name === 'uni3000' || name === '.notdef') {
-                        continue;
-                    }
+            # 3. メタデータ同期
+            if x_mins:
+                font['head'].xMin, font['head'].yMin = min(x_mins), min(y_mins)
+                font['head'].xMax, font['head'].yMax = max(x_maxs), max(y_maxs)
+                font['hhea'].advanceWidthMax = max_advance
 
-                    if (glyph.xMin !== undefined && glyph.xMax !== undefined) {
-                        const origWidth = glyph.xMax - glyph.xMin;
-                        glyph.leftSideBearing = sb;
-                        glyph.advanceWidth = sb + origWidth + sb;
-                    } else {
-                        glyph.leftSideBearing = sb;
-                        glyph.advanceWidth = sb * 2;
-                    }
-                }
+            # 4. 【変更点】Subsetを通さず、不具合の出やすいテーブルだけ削除して直接保存
+            # これにより「too much data」エラーを回避します
+            bad_tables = ['GSUB', 'GPOS', 'DSIG', 'hdmx', 'LTSH', 'PCLT', 'VDMX']
+            for t in bad_tables:
+                if t in font: del font[t]
 
-                if (font.tables) {
-                    BAD_TABLES.forEach(table => {
-                        if (font.tables[table.toLowerCase()]) {
-                            delete font.tables[table.toLowerCase()];
-                        }
-                    });
-                }
-
-                const lastDot = file.name.lastIndexOf('.');
-                const baseName = file.name.substring(0, lastDot);
-                const ext = file.name.substring(lastDot);
-                const outputFilename = `fixed_${baseName}${ext}`;
-
-                const fontBuffer = font.toArrayBuffer();
-                zip.file(outputFilename, fontBuffer);
-
-                // 処理が終わったら成功に上書きするヨ
-                updateLog(subLogId, `✅ Success: ${outputFilename}`, 'success');
-                successCount++;
-                await sleep(100);
-
-            } catch (err) {
-                updateLog(subLogId, `❌ Error: ${file.name} (${err.message})`, 'error');
-                console.error(err);
-            }
-        }
-
-        if (successCount > 0) {
-            updateLog(mainLogId, `📦 ZIPファイルを生成しているヨ... ダウンロードをお待ちくださいネ。`, 'processing');
-            await sleep(300);
+            # 5. 保存
+            font.save(output_path)
+            processed_paths.append(output_path)
+            log_messages.append(f"✅ Success: {output_filename}")
             
-            const timestamp = Math.floor(Date.now() / 1000);
-            const zipBlob = await zip.generateAsync({ type: 'blob' });
-            
-            const url = URL.createObjectURL(zipBlob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `fonts_fixed_${timestamp}.zip`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+        except Exception as e:
+            log_messages.append(f"❌ Error: {filename} ({str(e)})")
 
-            updateLog(mainLogId, `🎉 すべて完了！ ${successCount} 個のフォントをZIPにまとめたヨ！`, 'success');
-        } else {
-            updateLog(mainLogId, `❌ 処理に成功したフォントがなかったヨ。`, 'error');
-        }
-    }
+    zip_path = f"fonts_fixed_{timestamp}.zip"
+    with zipfile.ZipFile(zip_path, 'w') as zipf:
+        for f in processed_paths: zipf.write(f, os.path.basename(f))
+    return zip_path, "\n".join(log_messages)
 
-    function readFileAsArrayBuffer(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result);
-            reader.onerror = (e) => reject(new Error("ファイルの読み込みに失敗しました"));
-            reader.readAsArrayBuffer(file);
-        });
-    }
+# UI 
+with gr.Blocks() as demo:
+    gr.Markdown("### 📦 エラー回避重視・直接保存版")
+    gr.Markdown("subsetリペアを使わず、直接テーブルを書き換えて保存します。")
+    with gr.Row():
+        with gr.Column():
+           input_files = gr.File(label="フォント選択", file_count="multiple")
+            sb_input = gr.Number(value=30, label="左右余白")
+            btn = gr.Button("修正実行", variant="primary")
+        with gr.Column():
+            status = gr.Textbox(label="ログ")
+            output_zip = gr.File(label="ZIP")
+    btn.click(fn=process_multiple_fonts_no_rename, inputs=[input_files, sb_input], outputs=[output_zip, status])
 
-    function showLog(message, type, id) {
-        const div = document.createElement('div');
-        div.id = id;
-        div.className = `log-msg ${type}`;
-        div.innerHTML = message;
-        statusArea.appendChild(div);
-        statusArea.scrollTop = statusArea.scrollHeight;
-    }
-
-    function updateLog(id, message, type) {
-        const div = document.getElementById(id);
-        if (div) {
-            div.className = `log-msg ${type}`;
-            div.innerHTML = message;
-        }
-    }
-</script>
-
-</body>
-</html>
+demo.launch()
