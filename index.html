@@ -143,10 +143,11 @@
     const sbInput = document.getElementById('sb-input');
     const statusArea = document.getElementById('status-area');
 
-    // 不具合の出やすいテーブル（不要なメタデータ等）のリスト
     const BAD_TABLES = ['GSUB', 'GPOS', 'DSIG', 'hdmx', 'LTSH', 'PCLT', 'VDMX'];
 
-    // ドラッグ＆ドロップ関連イベント
+    // 画面の更新（描画）を強制的に待つためのタイマー関数
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
     ['dragenter', 'dragover'].forEach(eventName => {
         dropZone.addEventListener(eventName, (e) => {
             e.preventDefault();
@@ -166,7 +167,6 @@
     fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
     dropZone.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
 
-    // メイン処理
     async function handleFiles(files) {
         if (files.length === 0) return;
         statusArea.innerHTML = ''; // ログクリア
@@ -175,34 +175,32 @@
         const zip = new JSZip();
         let successCount = 0;
 
-        // 全体の進行状況を示すトップログ
         const mainLogId = 'main-log';
-        showLog(`⏳ 合計 ${files.length} 個のフォントを処理中...`, 'processing', mainLogId);
+        showLog(`⏳ 合計 ${files.length} 個のフォントの処理を開始するヨ...`, 'processing', mainLogId);
+        await sleep(300); // 開始メッセージを出すためにちょっと待つネ
 
-        // 各ファイルを非同期でループ処理
         for (const file of Array.from(files)) {
             const subLogId = 'log-' + Math.random().toString(36).substr(2, 9);
-            showLog(`⏳ ${file.name} を解析中...`, 'processing', subLogId);
+            
+            // 【ココを改善！】ハッキリ「処理中」と表示させて、少し待つコトで画面に表示させるヨ
+            showLog(`⏳ ${file.name} を処理中... 少々お待ちください...`, 'processing', subLogId);
+            await sleep(200); // 画面に「処理中」を表示させるためのウェイト
 
             try {
                 const arrayBuffer = await readFileAsArrayBuffer(file);
                 const font = opentype.parse(arrayBuffer);
 
-                // 全角・半角空白以外のグリフを調整
+                // 余白の調整処理
                 for (let i = 0; i < font.numGlyphs; i++) {
                     const glyph = font.glyphs.get(i);
                     const name = glyph.name;
 
-                    // 空白文字はスキップ
                     if (name === 'space' || name === 'uni3000' || name === '.notdef') {
                         continue;
                     }
 
-                    // バウンディングボックスが存在する場合
                     if (glyph.xMin !== undefined && glyph.xMax !== undefined) {
                         const origWidth = glyph.xMax - glyph.xMin;
-                        
-                        // 左右余白の設定に基づき、文字幅（advanceWidth）と左余白（leftSideBearing）を上書き
                         glyph.leftSideBearing = sb;
                         glyph.advanceWidth = sb + origWidth + sb;
                     } else {
@@ -211,7 +209,6 @@
                     }
                 }
 
-                // 不要・破損の原因になるテーブルの削除模擬（opentype.jsのデータ構造上から削除）
                 if (font.tables) {
                     BAD_TABLES.forEach(table => {
                         if (font.tables[table.toLowerCase()]) {
@@ -220,18 +217,18 @@
                     });
                 }
 
-                // 元の名前と拡張子を維持して出力名を決定
                 const lastDot = file.name.lastIndexOf('.');
                 const baseName = file.name.substring(0, lastDot);
                 const ext = file.name.substring(lastDot);
                 const outputFilename = `fixed_${baseName}${ext}`;
 
-                // バイナリデータにエクスポートしてZIPに追加
                 const fontBuffer = font.toArrayBuffer();
                 zip.file(outputFilename, fontBuffer);
 
+                // 処理が終わったら成功に上書きするヨ
                 updateLog(subLogId, `✅ Success: ${outputFilename}`, 'success');
                 successCount++;
+                await sleep(100);
 
             } catch (err) {
                 updateLog(subLogId, `❌ Error: ${file.name} (${err.message})`, 'error');
@@ -239,9 +236,9 @@
             }
         }
 
-        // 成功したファイルが1つ以上あればZIPをビルドしてダウンロード
         if (successCount > 0) {
-            updateLog(mainLogId, `📦 ZIPファイルを生成しています... ダウンロードをお待ちください。`, 'processing');
+            updateLog(mainLogId, `📦 ZIPファイルを生成しているヨ... ダウンロードをお待ちくださいネ。`, 'processing');
+            await sleep(300);
             
             const timestamp = Math.floor(Date.now() / 1000);
             const zipBlob = await zip.generateAsync({ type: 'blob' });
@@ -255,13 +252,12 @@
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
 
-            updateLog(mainLogId, `🎉 完了！ ${successCount} 個のフォントをZIPにまとめました。`, 'success');
+            updateLog(mainLogId, `🎉 すべて完了！ ${successCount} 個のフォントをZIPにまとめたヨ！`, 'success');
         } else {
-            updateLog(mainLogId, `❌ 処理に成功したフォントがありませんでした。`, 'error');
+            updateLog(mainLogId, `❌ 処理に成功したフォントがなかったヨ。`, 'error');
         }
     }
 
-    // FileReaderをPromise化するヘルパー関数
     function readFileAsArrayBuffer(file) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -271,14 +267,13 @@
         });
     }
 
-    // ログ表示・更新関数
     function showLog(message, type, id) {
         const div = document.createElement('div');
         div.id = id;
         div.className = `log-msg ${type}`;
         div.innerHTML = message;
         statusArea.appendChild(div);
-        statusArea.scrollTop = statusArea.scrollHeight; // 自動スクロール
+        statusArea.scrollTop = statusArea.scrollHeight;
     }
 
     function updateLog(id, message, type) {
