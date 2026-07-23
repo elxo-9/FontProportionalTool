@@ -87,11 +87,10 @@
         #file-input {
             display: none;
         }
-        /* ダウンロードエリアのスタイル */
         .download-action-area {
             margin: 20px 0;
             text-align: center;
-            display: none; /* 初期状態は非表示 */
+            display: none;
         }
         .download-btn {
             background-color: #2ecc71;
@@ -153,7 +152,7 @@
     </div>
 
     <div class="drop-zone" id="drop-zone">
-        <p>複数のフォントファイルをドロップするか、ここをクリック</p>
+        <p>複数のフォントファイルをドロップするか、ココをクリック</p>
         <span>対応フォーマット: .ttf / .otf</span>
         <input type="file" id="file-input" accept=".ttf,.otf" multiple>
     </div>
@@ -173,10 +172,13 @@
     const downloadActionArea = document.getElementById('download-action-area');
     const downloadBtn = document.getElementById('download-btn');
 
-    const BAD_TABLES = ['GSUB', 'GPOS', 'DSIG', 'hdmx', 'LTSH', 'PCLT', 'VDMX'];
+    // カーニングやその他の不要なメトリクス関連のテーブルも削除対象に追加したヨ
+    const BAD_TABLES = [
+        'GSUB', 'GPOS', 'DSIG', 'hdmx', 'LTSH', 'PCLT', 'VDMX',
+        'kern', 'vkrn', 'vmtx', 'vhea', 'VORG', 'BASE', 'GDEF', 'JSTF'
+    ];
     const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-    // 生成された最新のZIPのURLとファイル名を保持する変数
     let currentZipUrl = null;
     let currentZipName = "";
 
@@ -199,7 +201,6 @@
     fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
     dropZone.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
 
-    // 別途作成したボタンが押された時のダウンロード処理
     downloadBtn.addEventListener('click', () => {
         if (currentZipUrl) {
             const a = document.createElement('a');
@@ -214,7 +215,6 @@
     async function handleFiles(files) {
         if (files.length === 0) return;
         
-        // 新しい処理が始まったら、古い再ダウンロード用URLを解放してボタンを隠すヨ
         if (currentZipUrl) {
             URL.revokeObjectURL(currentZipUrl);
             currentZipUrl = null;
@@ -233,12 +233,17 @@
         for (const file of Array.from(files)) {
             const subLogId = 'log-' + Math.random().toString(36).substr(2, 9);
             
-            showLog(`⏳ ${file.name} を処理中... 少々お待ちください...`, 'processing', subLogId);
+            showLog(`⏳ ${file.name} を処理中... 少々お待ちくださいネ...`, 'processing', subLogId);
             await sleep(200);
 
             try {
                 const arrayBuffer = await readFileAsArrayBuffer(file);
                 const font = opentype.parse(arrayBuffer);
+
+                // オブジェクトが保持しているカーニングペア情報も空にして消去するヨ
+                if (font.kerningPairs) {
+                    font.kerningPairs = {};
+                }
 
                 for (let i = 0; i < font.numGlyphs; i++) {
                     const glyph = font.glyphs.get(i);
@@ -291,11 +296,9 @@
             const timestamp = Math.floor(Date.now() / 1000);
             const zipBlob = await zip.generateAsync({ type: 'blob' });
             
-            // 生成したURLを変数に保存しておくヨ
             currentZipUrl = URL.createObjectURL(zipBlob);
             currentZipName = `fonts_fixed_${timestamp}.zip`;
             
-            // 自動ダウンロードを実行するヨ
             const a = document.createElement('a');
             a.href = currentZipUrl;
             a.download = currentZipName;
@@ -303,7 +306,6 @@
             a.click();
             document.body.removeChild(a);
 
-            // 【ココを追加！】処理が終わったら別途ダウンロードできるボタンをパッと表示させるヨ
             downloadActionArea.style.display = 'block';
 
             updateLog(mainLogId, `🎉 すべて完了！自動保存をキャンセルした場合は、上のボタンから再取得できるヨ！`, 'success');
@@ -316,7 +318,7 @@
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = (e) => resolve(e.target.result);
-            reader.onerror = (e) => reject(new Error("ファイルの読み込みに失敗しました"));
+            reader.onerror = (e) => reject(new Error("ファイルの読み込みに失敗したヨ"));
             reader.readAsArrayBuffer(file);
         });
     }
