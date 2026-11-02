@@ -39,7 +39,8 @@ button:focus-visible,.drop-zone:focus-visible,input:focus-visible{outline:2px so
 </head>
 <body>
 
-<div class="container">\n    <div class="topbar"><button class="theme-btn" id="theme-btn" type="button">ダークモード</button></div>
+<div class="container">
+    <div class="topbar"><button class="theme-btn" id="theme-btn" type="button">ダークモード</button></div>
     <h1>Font Side-Bearing Fixer</h1>
     <p class="desc">フォントの左右余白を指定値に調整し、複数ファイルをまとめてZIP出力します。</p>
 
@@ -67,7 +68,13 @@ button:focus-visible,.drop-zone:focus-visible,input:focus-visible{outline:2px so
     const sbInput = document.getElementById('sb-input');
     const statusArea = document.getElementById('status-area');
     const downloadActionArea = document.getElementById('download-action-area');
-    const downloadBtn = document.getElementById('download-btn');\n    const themeBtn = document.getElementById('theme-btn');\n    const savedTheme = localStorage.getItem('font-tool-theme');\n    if (savedTheme === 'dark' || savedTheme === 'light') document.documentElement.dataset.theme = savedTheme;\n    function updateThemeButton() { themeBtn.textContent = document.documentElement.dataset.theme === 'dark' ? 'ライトモード' : 'ダークモード'; }\n    updateThemeButton();\n    themeBtn.addEventListener('click', () => { const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = next; localStorage.setItem('font-tool-theme', next); updateThemeButton(); });
+    const downloadBtn = document.getElementById('download-btn');
+    const themeBtn = document.getElementById('theme-btn');
+    const savedTheme = localStorage.getItem('font-tool-theme');
+    if (savedTheme === 'dark' || savedTheme === 'light') document.documentElement.dataset.theme = savedTheme;
+    function updateThemeButton() { themeBtn.textContent = document.documentElement.dataset.theme === 'dark' ? 'ライトモード' : 'ダークモード'; }
+    updateThemeButton();
+    themeBtn.addEventListener('click', () => { const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = next; localStorage.setItem('font-tool-theme', next); updateThemeButton(); });
 
     // カーニングや関連メトリクスのテーブルを削除対象にする
     const BAD_TABLES = [
